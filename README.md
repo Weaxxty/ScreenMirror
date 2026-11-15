@@ -4,6 +4,16 @@
 Открываешь ScreenMirror, выбираешь компьютер в **«Повторе экрана»** на iPhone и вводишь код из окна приложения.
 На iPhone ничего устанавливать не нужно.
 
+## Скриншоты
+
+### Главный экран
+
+<img src="docs/screenshots/main-window.png" alt="Главный экран ScreenMirror с инструкцией подключения iPhone и кодом AirPlay" width="900">
+
+### Трансляция iPhone
+
+<img src="docs/screenshots/iphone-mirroring.png" alt="Экран iPhone в окне ScreenMirror" width="400">
+
 ## Установка
 
 1. Открой **Releases** этого репозитория.
