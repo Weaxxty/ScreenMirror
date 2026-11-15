@@ -9,6 +9,12 @@ plugins=(coreelements app playback typefindfunctions videoparsersbad videoconver
 manifest="$repo_root/build/runtime-files.txt"
 : > "$manifest"
 queue=()
+declare -A dll_files
+for file in /ucrt64/bin/*.dll; do
+  name="$(basename "$file")"
+  dll_files["${name,,}"]="$file"
+done
+printf 'Bundling runtime plugins and DLL dependencies...\n' 
 copy_file() {
   local src="$1" rel="$2"
   if [[ ! -f "$runtime/$rel" ]]; then
@@ -33,25 +39,21 @@ copy_file /ucrt64/bin/gst-inspect-1.0.exe bin/gst-inspect-1.0.exe
 for ((i=0;i<${#queue[@]};i++)); do
   while IFS= read -r dll; do
     [[ -n "$dll" ]] || continue
-    file="/ucrt64/bin/$dll"
-    if [[ ! -f "$file" ]]; then
-      file=$(find /ucrt64/bin -maxdepth 1 -iname "$dll" -print -quit)
-    fi
+    file="${dll_files[${dll,,}]:-}"
     if [[ -n "$file" && -f "$file" ]]; then copy_file "$file" "bin/$(basename "$file")"; fi
   done < <(objdump -p "${queue[i]}" | awk '/DLL Name:/{sub(/.*DLL Name: */,"");gsub(/\r/,"");print}')
 done
 sort -u "$manifest" -o "$manifest"
 packages="$repo_root/build/runtime-packages.txt"
 : > "$packages"
-while IFS= read -r file; do pacman -Qqo "$file"; done < "$manifest" | sort -u > "$packages"
-while IFS= read -r pkg; do
-  while IFS= read -r license; do
-    [[ -f "$license" ]] || continue
-    rel="${license#/ucrt64/share/licenses/}"
-    mkdir -p "$payload/licenses/runtime/$(dirname "$rel")"
-    cp "$license" "$payload/licenses/runtime/$rel"
-  done < <(pacman -Ql "$pkg" | awk '$2 ~ /^\/ucrt64\/share\/licenses\// {print $2}')
-done < "$packages"
+xargs -d '\n' -n 40 pacman -Qqo < "$manifest" | sort -u > "$packages"
+while IFS= read -r license; do
+  [[ -f "$license" ]] || continue
+  rel="${license#/ucrt64/share/licenses/}"
+  mkdir -p "$payload/licenses/runtime/$(dirname "$rel")"
+  cp "$license" "$payload/licenses/runtime/$rel"
+done < <(xargs -n 40 pacman -Ql < "$packages" | awk '$2 ~ /^\/ucrt64\/share\/licenses\// {print $2}' | sort -u)
+printf 'Bundled %s runtime files from %s packages.\n' "$(wc -l < "$manifest")" "$(wc -l < "$packages")"
 pacman -Q $(cat "$packages") > "$payload/runtime-versions.txt"
 # All source archives include the upstream sources and the MSYS2 build recipe.
 /usr/bin/python "$repo_root/scripts/collect-sources.py" "$repo_root"

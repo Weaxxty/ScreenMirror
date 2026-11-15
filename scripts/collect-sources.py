@@ -68,6 +68,7 @@ def main(root):
         filename = archive_name(record)
         target = destination / filename
         if filename not in archives:
+            print(f'Downloading source: {filename}', flush=True)
             url = download(filename, target)
             with target.open('rb') as stream:
                 digest = hashlib.file_digest(stream, 'sha256').hexdigest()
