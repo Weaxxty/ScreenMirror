@@ -1,0 +1,118 @@
+name: Windows installer
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Determine version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          $version = '1.0.0'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:RELEASE_REF -notmatch '^v(\d+\.\d+\.\d+)$') { throw 'Tag must be vX.Y.Z.' }
+            $version = $Matches[1]
+          }
+          "value=$version" >> $env:GITHUB_OUTPUT
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git python zip ca-certificates
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libplist
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-gst-libav
+      - name: Build AirPlay engine
+        shell: msys2 {0}
+        run: bash scripts/build-engine.sh
+      - name: Bundle runtime and corresponding sources
+        shell: msys2 {0}
+        run: bash scripts/bundle-runtime.sh
+      - name: Build desktop application
+        shell: powershell
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: .\scripts\Build-App.ps1 -Version $env:APP_VERSION
+      - name: Test source metadata helpers
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Test packaged application without MSYS2 in PATH
+        shell: powershell
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          .\scripts\Test-App.ps1 -AppDirectory (Join-Path $PWD 'dist\payload')
+      - name: Build installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          }
+          & $iscc "/DAppVersion=$env:APP_VERSION" installer\ScreenMirror.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+      - name: Test installation, launch and uninstall
+        shell: powershell
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $setup = Join-Path $PWD "dist\ScreenMirror-Setup-$env:APP_VERSION-x64.exe"
+          $installed = Join-Path $env:RUNNER_TEMP 'ScreenMirror-install-test'
+          $process = Start-Process $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="'+$installed+'"')) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Installation failed.' }
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
+          .\scripts\Test-App.ps1 -AppDirectory $installed
+          $process = Start-Process (Join-Path $installed 'unins000.exe') -ArgumentList '/VERYSILENT','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or (Test-Path (Join-Path $installed 'ScreenMirror.exe'))) { throw 'Uninstallation failed.' }
+      - name: Create source archive and checksums
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.value }}
+        run: python scripts/package-release.py $env:APP_VERSION
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ScreenMirror-Windows
+          if-no-files-found: error
+          path: |
+            dist/ScreenMirror-Setup-*-x64.exe
+            dist/ScreenMirror-source.zip
+            dist/SHA256SUMS.txt
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ScreenMirror-Windows
+          path: release
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" release/* --verify-tag --title "ScreenMirror $RELEASE_TAG" --generate-notes
