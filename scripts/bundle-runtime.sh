@@ -5,7 +5,7 @@ payload="$repo_root/dist/payload"
 runtime="$payload/runtime"
 mkdir -p "$runtime/lib/gstreamer-1.0" "$runtime/libexec/gstreamer-1.0" "$payload/licenses/runtime" "$repo_root/build"
 # Keep the plugins needed for mirroring, audio and codec negotiation.
-plugins=(coreelements app playback typefindfunctions videoparsersbad videoconvertscale videofilter videorate autodetect d3d11 wasapi wasapi2 directsound audioconvert audioresample audioparsers volume audiofx libav isomp4 jpeg png rtp rtpmanager videobox compositor audiomixer)
+plugins=(coreelements app playback typefindfunctions videoparsersbad videoconvertscale videofilter videorate autodetect d3d11 wasapi wasapi2 directsound audioconvert audioresample audioparsers volume audiofx level imagefreeze pango libav isomp4 jpeg png rtp rtpmanager videobox compositor audiomixer)
 manifest="$repo_root/build/runtime-files.txt"
 : > "$manifest"
 queue=()
@@ -14,7 +14,7 @@ for file in /ucrt64/bin/*.dll; do
   name="$(basename "$file")"
   dll_files["${name,,}"]="$file"
 done
-printf 'Bundling runtime plugins and DLL dependencies...\n' 
+printf 'Bundling runtime plugins and DLL dependencies...\n'
 copy_file() {
   local src="$1" rel="$2"
   if [[ ! -f "$runtime/$rel" ]]; then
@@ -30,7 +30,7 @@ for plugin in "${plugins[@]}"; do
   file="/ucrt64/lib/gstreamer-1.0/libgst${plugin}.dll"
   if [[ -f "$file" ]]; then copy_file "$file" "lib/gstreamer-1.0/$(basename "$file")"; fi
 done
-for required in coreelements app playback videoparsersbad videoconvertscale videofilter d3d11 wasapi audioconvert audioresample volume libav; do
+for required in coreelements app playback videoparsersbad videoconvertscale videofilter d3d11 wasapi audioconvert audioresample volume level imagefreeze pango jpeg libav; do
   test -f "$runtime/lib/gstreamer-1.0/libgst${required}.dll" || { echo "Missing required plugin: $required" >&2; exit 1; }
 done
 copy_file /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe libexec/gstreamer-1.0/gst-plugin-scanner.exe
